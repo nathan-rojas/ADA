@@ -1,0 +1,14 @@
+cat << 'EOF' > .gitignore
+# Ejecutables de Windows
+*.exe
+VrpSolver
+
+# Archivos Objeto (Compilación)
+*.o
+SRC/*.o
+
+# Archivos temporales de Editores/VS Code
+.vscode/
+.idea/
+*.log
+EOF
