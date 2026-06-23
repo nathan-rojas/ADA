@@ -8,46 +8,39 @@ float SavingsAlgorithm::calculateDistance(const Customer& c1, const Customer& c2
     return std::sqrt(std::pow(c1.x - c2.x, 2) + std::pow(c1.y - c2.y, 2));
 }
 
-// Implementación del Algoritmo de Ahorros de Clarke-Wright
+// Implementación del Algoritmo de Ahorros de Clarke-Wright (CORREGIDO Y ESTRICTO)
 std::vector<std::vector<int>> SavingsAlgorithm::solveClarkeWright(const std::vector<Customer>& customers, int vehicleCapacity, float& totalDistance, double& executionTime) {
-    // Iniciamos el cronómetro de alta resolución para medir el rendimiento
     auto start = std::chrono::high_resolution_clock::now();
     
     int n = customers.size();
     totalDistance = 0;
     
-    if (n <= 1) return {}; // Si solo hay depósito o nada, terminamos.
+    if (n <= 1) return {}; 
 
-    const Customer& depot = customers[0]; // El nodo 0 es siempre el depósito central
-    std::vector<Saving> savingsList;     // Vector para almacenar todos los ahorros posibles
+    const Customer& depot = customers[0]; 
+    std::vector<Saving> savingsList;     
 
     // 1. Calcular los ahorros S_ij para cada par de clientes (i, j)
     for (int i = 1; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
-            float d_0i = calculateDistance(depot, customers[i]); // Distancia depósito a i
-            float d_0j = calculateDistance(depot, customers[j]); // Distancia depósito a j
-            float d_ij = calculateDistance(customers[i], customers[j]); // Distancia i a j
+            float d_0i = calculateDistance(depot, customers[i]); 
+            float d_0j = calculateDistance(depot, customers[j]); 
+            float d_ij = calculateDistance(customers[i], customers[j]); 
             
-            float s_ij = d_0i + d_0j - d_ij; // Fórmula estándar de Clarke-Wright
+            float s_ij = d_0i + d_0j - d_ij; 
             savingsList.push_back({i, j, s_ij});
         }
     }
 
-    // 2. Ordenar los ahorros en orden descendente (mayor ahorro primero)
+    // 2. Ordenar los ahorros en orden descendente
     std::sort(savingsList.begin(), savingsList.end(), [](const Saving& a, const Saving& b) {
         return a.savings > b.savings;
     });
 
-    // Inicializar: cada cliente empieza en su propia ruta exclusiva (Depósito -> Cliente -> Depósito)
+    // Inicializar: cada cliente empieza en su propia ruta exclusiva
     std::vector<std::vector<int>> routes;
     for (int i = 1; i < n; ++i) {
         routes.push_back({i});
-    }
-
-    // Vector para rastrear la capacidad actual consumida por cada ruta creada
-    std::vector<int> routeDemands;
-    for (int i = 1; i < n; ++i) {
-        routeDemands.push_back(customers[i].demand);
     }
 
     // 3. Fusionar rutas basándonos en la lista ordenada de ahorros
@@ -59,18 +52,28 @@ std::vector<std::vector<int>> SavingsAlgorithm::solveClarkeWright(const std::vec
         for (size_t r = 0; r < routes.size(); ++r) {
             if (!routes[r].empty()) {
                 if (routes[r].front() == s.i || routes[r].back() == s.i) {
-                    if (routeIdxI == -1) routeIdxI = r; // Encontrado en los extremos de la ruta r
+                    if (routeIdxI == -1) routeIdxI = r; 
                 }
                 if (routes[r].front() == s.j || routes[r].back() == s.j) {
-                    if (routeIdxJ == -1) routeIdxJ = r; // Encontrado en los extremos de la ruta r
+                    if (routeIdxJ == -1) routeIdxJ = r; 
                 }
             }
         }
 
         // Condición de fusión: Deben estar en rutas distintas y válidas
         if (routeIdxI != -1 && routeIdxJ != -1 && routeIdxI != routeIdxJ) {
-            // Validar si la suma de demandas no excede la capacidad del vehículo
-            if (routeDemands[routeIdxI] + routeDemands[routeIdxJ] <= vehicleCapacity) {
+            
+            // --- CORRECCIÓN CRÍTICA DE CAPACIDAD ---
+            // Calculamos la demanda total de la ruta I sumando sus nodos reales
+            int demandaRutaI = 0;
+            for (int node : routes[routeIdxI]) demandaRutaI += customers[node].demand;
+
+            // Calculamos la demanda total de la ruta J sumando sus nodos reales
+            int demandaRutaJ = 0;
+            for (int node : routes[routeIdxJ]) demandaRutaJ += customers[node].demand;
+
+            // Solo si la unión NO supera el límite real de carga, procedemos
+            if (demandaRutaI + demandaRutaJ <= vehicleCapacity) {
                 
                 bool merged = false;
                 // Caso A: 'i' es el final de su ruta y 'j' es el inicio de la suya
@@ -81,17 +84,17 @@ std::vector<std::vector<int>> SavingsAlgorithm::solveClarkeWright(const std::vec
                 // Caso B: 'j' es el final de su ruta e 'i' es el inicio de la suya
                 else if (routes[routeIdxJ].back() == s.j && routes[routeIdxI].front() == s.i) {
                     routes[routeIdxJ].insert(routes[routeIdxJ].end(), routes[routeIdxI].begin(), routes[routeIdxI].end());
-                    routes[routeIdxI] = routes[routeIdxJ]; // Asignamos la unión a la posición de I
-                    routeIdxJ = routeIdxI; // Actualizamos índices para el borrado
+                    routes[routeIdxI] = routes[routeIdxJ]; 
+                    routeIdxJ = routeIdxI; 
                     merged = true;
                 }
-                // Caso C: Ambos son extremos iniciales (se invierte una)
+                // Caso C: Ambos son extremos iniciales
                 else if (routes[routeIdxI].front() == s.i && routes[routeIdxJ].front() == s.j) {
                     std::reverse(routes[routeIdxI].begin(), routes[routeIdxI].end());
                     routes[routeIdxI].insert(routes[routeIdxI].end(), routes[routeIdxJ].begin(), routes[routeIdxJ].end());
                     merged = true;
                 }
-                // Caso D: Ambos son extremos finales (se invierte una)
+                // Caso D: Ambos son extremos finales
                 else if (routes[routeIdxI].back() == s.i && routes[routeIdxJ].back() == s.j) {
                     std::reverse(routes[routeIdxJ].begin(), routes[routeIdxJ].end());
                     routes[routeIdxI].insert(routes[routeIdxI].end(), routes[routeIdxJ].begin(), routes[routeIdxJ].end());
@@ -99,39 +102,35 @@ std::vector<std::vector<int>> SavingsAlgorithm::solveClarkeWright(const std::vec
                 }
 
                 if (merged) {
-                    // Actualizamos la demanda de la ruta consolidada
-                    routeDemands[routeIdxI] += routeDemands[routeIdxJ];
-                    // Vaciamos la ruta vieja que fue absorbida
+                    // Vaciamos de forma limpia la ruta vieja que fue absorbida
                     routes[routeIdxJ].clear();
-                    routeDemands[routeIdxJ] = 0;
                 }
             }
         }
     }
 
-    // Limpiar el contenedor eliminando las rutas vacías que quedaron tras las fusiones
+    // Limpiar el contenedor eliminando las rutas vacías
     std::vector<std::vector<int>> finalRoutes;
     for (const auto& route : routes) {
         if (!route.empty()) {
             finalRoutes.push_back(route);
             
-            // Calcular la distancia total recorrida final sumando los trayectos de esta ruta
-            float currentDist = calculateDistance(depot, customers[route.front()]); // Depósito a Primer Cliente
+            float currentDist = calculateDistance(depot, customers[route.front()]); 
             for (size_t k = 0; k < route.size() - 1; ++k) {
                 currentDist += calculateDistance(customers[route[k]], customers[route[k+1]]);
             }
-            currentDist += calculateDistance(customers[route.back()], depot); // Último Cliente de regreso al depósito
+            currentDist += calculateDistance(customers[route.back()], depot); 
             totalDistance += currentDist;
         }
     }
 
-    // Detener el cronómetro y calcular los milisegundos transcurridos
     auto end = std::chrono::high_resolution_clock::now();
     executionTime = std::chrono::duration<double, std::milli>(end - start).count();
 
     return finalRoutes;
 }
 
+// ... (Aquí abajo dejas tu función solveNearestNeighbor tal cual la tenías, no necesita cambios)
 // Algoritmo de comparación secundario: Vecino Más Cercano (Greedy)
 std::vector<std::vector<int>> SavingsAlgorithm::solveNearestNeighbor(const std::vector<Customer>& customers, int vehicleCapacity, float& totalDistance, double& executionTime) {
     auto start = std::chrono::high_resolution_clock::now();

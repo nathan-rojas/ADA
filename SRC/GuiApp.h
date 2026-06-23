@@ -18,6 +18,10 @@ private:
     size_t lineasADibujar;       // Control de animación por ENTER
     size_t totalAristasSolucion; // Límite de la animación
     bool useClarkeWright;        // Alternar con TAB
+    float naiveDistance = 0.0f;       // Distancia enviando un camión por cada proveedor
+    float totalSavingsGenerados = 0.0f; // Ahorro total (Clarke-Wright)
+    int totalSavingsEvaluados = 0;   // Cuántos pares i,j se analizaron
+    int totalSavingsAceptados = 0;   // Cuántas fusiones pasaron los filtros de capacidad
 
     std::vector<Customer> customers;
     int vehicleCapacity;

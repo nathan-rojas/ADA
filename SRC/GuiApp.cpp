@@ -75,11 +75,20 @@ void GuiApp::actualizarAlgoritmos() {
         }
     }
     totalCamionesUsados = activeRoutes.size();
+    naiveDistance = 0.0f;
+    for (size_t i = 1; i < customers.size(); ++i) {
+    // Distancia de ida y vuelta desde el depósito (0) a cada proveedor (i)
+    float d = std::sqrt(std::pow(customers[i].x - customers[0].x, 2) + std::pow(customers[i].y - customers[0].y, 2));
+    naiveDistance += (d * 2.0f); 
+    }
+    // El ahorro es simplemente la resta
+    totalSavingsGenerados = naiveDistance - (useClarkeWright ? cwDistance : nnDistance);
+    if (totalSavingsGenerados < 0) totalSavingsGenerados = 0; // Por si Vecino Cercano es pésimo
 }
 
 void GuiApp::initWindow() {
-    // Ventana más alta (800x750) para dar espacio a los cuadros informativos de los camiones abajo
-    window.create(sf::VideoMode({800, 750}), "VRP Solver Escalable - N Camiones & Z Proveedores", sf::Style::Titlebar | sf::Style::Close);
+    // Ventana más alta (800x950) para dar espacio a los cuadros informativos de los camiones abajo
+    window.create(sf::VideoMode({800, 950}), "VRP Solver Escalable - N Camiones & Z Proveedores", sf::Style::Titlebar | sf::Style::Close);
     window.setFramerateLimit(60); 
 }
 
@@ -126,21 +135,26 @@ void GuiApp::render() {
     textoMapa.setCharacterSize(11);
     textoMapa.setFillColor(sf::Color(170, 170, 170));
 
-    // Arreglo para guardar dinámicamente la telemetría/cuadros de cada camión
-    std::vector<std::string> reporteCamiones(activeRoutes.size(), "No asignado");
+    // Arreglos para guardar dinámicamente la telemetría/cuadros de cada camión
     std::vector<float> distanciaPorCamion(activeRoutes.size(), 0.0f);
     std::vector<int> cargaPorCamion(activeRoutes.size(), 0);
 
+    // --- PRIMERA PASADA: CALCULAR CARGAS POR RUTA ---
     int routeIdx = 0;
+    for (const auto& route : activeRoutes) {
+        if (route.empty()) { routeIdx++; continue; }
+        for (int node : route) {
+            cargaPorCamion[routeIdx] += customers[node].demand;
+        }
+        routeIdx++;
+    }
+
+    // --- SEGUNDA PASADA: RENDERIZAR ARISTAS PASO A PASO Y CALCULAR DISTANCIAS ---
+    routeIdx = 0;
     for (const auto& route : activeRoutes) {
         if (route.empty()) { routeIdx++; continue; }
         
         sf::Color currentLineColor = routeColors[routeIdx % colorCount];
-
-        // Calcular datos reales acumulados para los cuadros informativos inferiores
-        for (int node : route) {
-            cargaPorCamion[routeIdx] += customers[node].demand;
-        }
 
         // 1. Depósito -> Primer Nodo
         sf::Vector2f pDepot(customers[0].x, customers[0].y + Y_OFFSET);
@@ -193,25 +207,6 @@ void GuiApp::render() {
             window.draw(textoMapa);
             lineasPintadas++;
         }
-
-        // Construir string formateado del CUADRO DEL CAMIÓN solicitado
-        std::stringstream ssReporte;
-        ssReporte << "CAMION " << (routeIdx + 1) << ": ";
-        if (lineasPintadas > 0 && lineasADibujar > (lineasPintadas - route.size() - 1)) {
-            ssReporte << "[EN RUTA] ";
-        } else if (lineasADibujar >= lineasPintadas) {
-            ssReporte << "[COMPLETADO] ";
-        } else {
-            ssReporte << "[EN ESPERA] ";
-        }
-        
-        ssReporte << "| Carga: " << cargaPorCamion[routeIdx] << "/" << vehicleCapacity << " un. "
-                  << "| Dist: " << (int)distanciaPorCamion[routeIdx] << " px\n"
-                  << "   Recorrido: DEPOT -> ";
-        for (int node : route) { ssReporte << "P" << node << " -> "; }
-        ssReporte << "DEPOT";
-        
-        reporteCamiones[routeIdx] = ssReporte.str();
         routeIdx++;
     }
 
@@ -238,62 +233,146 @@ void GuiApp::render() {
         }
     }
 
-    // Panel Superior: Métricas Generales del Sistema
-    sf::Text uiText(font); 
-    uiText.setCharacterSize(12);
-    uiText.setFillColor(sf::Color::White);
-    uiText.setPosition({15.0f, 10.0f});
-
+    // --- LOGICA DE METRICAS GENERALES Y COMPARATIVAS ---
     float totalCargaFlota = 0;
     for(int c : cargaPorCamion) totalCargaFlota += c;
     float eficienciaOcupacion = (totalCamionesUsados > 0) ? (totalCargaFlota / (totalCamionesUsados * vehicleCapacity)) * 100.0f : 0.0f;
 
+    float distanciaActual = useClarkeWright ? cwDistance : nnDistance;
+    float litrosConsumidos = (distanciaActual / 100.0f) * 1.5f;
+    float CO2Generado = litrosConsumidos * 2.6f;
+
+    // Cálculo dinámico de la solución Naive (Cada proveedor visitado individualmente por separado)
+    float naiveDistance = 0.0f;
+    for (size_t i = 1; i < customers.size(); ++i) {
+        float dDepot = std::sqrt(std::pow(customers[i].x - customers[0].x, 2) + std::pow(customers[i].y - customers[0].y, 2));
+        naiveDistance += (dDepot * 2.0f);
+    }
+    float totalSavingsGenerados = naiveDistance - distanciaActual;
+    if (totalSavingsGenerados < 0.0f) totalSavingsGenerados = 0.0f;
+
+    // Sostenibilidad Avanzada
+    float co2PorUnidad = (totalCargaFlota > 0) ? (CO2Generado / totalCargaFlota) : 0.0f;
+    float litrosNaive = (naiveDistance / 100.0f) * 1.5f;
+    float CO2Naive = litrosNaive * 2.6f;
+    float CO2Ahorrado = (CO2Naive - CO2Generado > 0) ? CO2Naive - CO2Generado : 0.0f;
+
+    // Ratio de Compactación
+    float ratioCompactacion = (totalCamionesUsados > 0) ? (float)cantidadProveedores / totalCamionesUsados : 0.0f;
+
+    // Conteo de camiones y carga rechazada en caso de infactibilidad física
+    int rutasNoAsignadasCount = 0;
+    int cargaNoAtendidaTotal = 0;
+    for (size_t i = 0; i < activeRoutes.size(); ++i) {
+        if (!activeRoutes[i].empty() && i >= (size_t)cantidadCamionesMax) {
+            rutasNoAsignadasCount++;
+            cargaNoAtendidaTotal += cargaPorCamion[i];
+        }
+    }
+
+    // --- RE-RENDER PANEL SUPERIOR COMPACTO ---
+    sf::Text uiText(font); 
+    uiText.setCharacterSize(11);
+    uiText.setFillColor(sf::Color::White);
+    uiText.setPosition({15.0f, 5.0f});
+
     std::stringstream ssSuperior;
-    ssSuperior << "=== SISTEMA VRP GLOBAL (SCALABLE ENGINE) ===\n"
-               << "Proveedores (Z): " << cantidadProveedores << " | Flota Disp (N): " << cantidadCamionesMax 
-               << " | Camiones Requeridos: " << totalCamionesUsados << " | Eficiencia de Carga: " << (int)eficienciaOcupacion << "%\n"
-               << "Controles: [ENTER] Tramos Paso a Paso (" << lineasADibujar << "/" << totalAristasSolucion << ") | [TAB] Alternar Algoritmo\n"
-               << "Algoritmo Activo: " << (useClarkeWright ? "CLARKE-WRIGHT SAVINGS ENGINE" : "VECINO MAS CERCANO") << "\n"
-               << "Distancia Combinada Flota: " << (useClarkeWright ? cwDistance : nnDistance) << " px | Tiempo de Calculo: " << (useClarkeWright ? cwTime : nnTime) << " ms";
+    ssSuperior << "=== PANEL ANALITICO DE LOGISTICA GLOBAL ===\n"
+               << "Proveedores: " << cantidadProveedores << " | Flota Max (N): " << cantidadCamionesMax 
+               << " | Camiones Req: " << totalCamionesUsados << " | Utilizacion Media Carga: " << (int)eficienciaOcupacion << "%\n"
+               << "Algoritmo: " << (useClarkeWright ? "CLARKE-WRIGHT SAVINGS ENGINE" : "VECINO MAS CERCANO") 
+               << " | Ratio Compactacion: " << std::fixed << std::setprecision(2) << ratioCompactacion << " prov/vco\n"
+               << "Dist. Flota: " << (int)distanciaActual << " px (Ahorro vs Naive: " << (int)totalSavingsGenerados << " px) | CPU Alg: " << (useClarkeWright ? cwTime : nnTime) << " ms\n"
+               << "DIAGNOSTICO: " << (totalCamionesUsados <= cantidadCamionesMax ? "[SOLUCION FACTIBLE]" : "[¡SOLUCION INFACTIBLE - AJUSTAR EXCESO!]") << " ";
+    
+    if (totalCamionesUsados > cantidadCamionesMax) {
+        ssSuperior << "| Pendientes: " << rutasNoAsignadasCount << " ruta(s) | Carga Abandonada: " << cargaNoAtendidaTotal << " u\n";
+    } else {
+        ssSuperior << "| Toda la demanda fue cubierta con la flota dispuesta.\n";
+    }
+
+    ssSuperior << "LOGISTICA VERDE -> Consumo: " << std::fixed << std::setprecision(1) << litrosConsumidos << " L | Emisiones: " << CO2Generado << " kg CO2\n"
+               << "                 > CO2/Unidad: " << std::fixed << std::setprecision(3) << co2PorUnidad << " kg/u | CO2 Evitado por ADA: " << std::fixed << std::setprecision(1) << CO2Ahorrado << " kg";
+               
     uiText.setString(ssSuperior.str());
     window.draw(uiText);
 
-    // Separador Estético Central para delimitar el Mapa del Panel de Camiones Inferior
-    sf::RectangleShape lineaSeparadora({800.0f, 2.0f});
+// ===============================================================================
+    // Separador Estético Central (Se adapta automáticamente al ancho de la ventana)
+    // ===============================================================================
+    float ventanaAncho = static_cast<float>(window.getSize().x);
+    sf::RectangleShape lineaSeparadora({ventanaAncho, 2.0f});
     lineaSeparadora.setPosition({0.0f, 500.0f});
     lineaSeparadora.setFillColor(sf::Color(80, 80, 80));
     window.draw(lineaSeparadora);
 
-    // === CUADROS INFERIORES: ESTADO EN TIEMPO REAL DE CADA CAMIÓN ===
+    // ===============================================================================
+    // --- CUADRÍCULA BIDIMENSIONAL EN PARES (COLUMNA IZQUIERDA Y DERECHA) ---
+    // ===============================================================================
     sf::Text uiCamiones(font);
-    uiCamiones.setCharacterSize(12);
-    uiCamiones.setPosition({20.0f, 515.0f});
+    uiCamiones.setCharacterSize(11);
 
-    std::stringstream ssInferior;
-    ssInferior << "=== TELEMETRIA DE CUADROS POR VEHICULO (ESTADO DE LA FLOTA BAJO DEMANDA) ===\n\n";
+    float baseY = 510.0f; // Altura inicial donde empiezan los camiones
     
-    // Alerta crítica si el algoritmo requiere más camiones de los que configuraste por consola (N)
-    if (totalCamionesUsados > cantidadCamionesMax) {
-        ssInferior << "¡ALERTA LOGISTICA! Se requieren " << totalCamionesUsados 
-                   << " camiones para la demanda actual, pero solo dispone de N=" << cantidadCamionesMax << ".\n\n";
-    }
+    uiCamiones.setFillColor(sf::Color::White);
+    uiCamiones.setString("=== TELEMETRIA EN TIEMPO REAL POR UNIDAD DE TRANSPORTE (DISTRIBUCION EN PARES) ===");
+    uiCamiones.setPosition({20.0f, baseY});
+    window.draw(uiCamiones);
+    baseY += 20.0f;
 
-    for (size_t i = 0; i < reporteCamiones.size(); ++i) {
-        if (i < 3) { // Limitar dibujo visual a los primeros 3 camiones para no desbordar la pantalla
-            ssInferior << reporteCamiones[i] << "\n---------------------------------------------------------------------------------\n";
+    int indexCamionActivo = 0; // Contador secuencial para calcular las posiciones en la matriz
+
+    for (size_t i = 0; i < activeRoutes.size(); ++i) {
+        if (!activeRoutes[i].empty()) {
+            bool esVehiculoExcedente = (i >= (size_t)cantidadCamionesMax);
+            sf::Color colorCamion = esVehiculoExcedente ? sf::Color(240, 70, 70) : routeColors[i % colorCount]; 
+            
+            // --- MATEMÁTICA DE MATRIZ DINÁMICA ---
+            // Dividimos el espacio disponible a la mitad
+            float colAncho = ventanaAncho / 2.0f;
+            
+            // Si el índice es par va a la izquierda (columna 0). Si es impar va a la derecha (columna 1).
+            float currentX = (indexCamionActivo % 2 == 0) ? 20.0f : (colAncho + 20.0f);
+            
+            // Cada dos camiones dibujados, bajamos de fila (sumamos 65 píxeles verticales)
+            float currentY = baseY + (indexCamionActivo / 2) * 65.0f;
+
+            // 1. Barra de Carga Visual Horizontal
+            int porcentaje = (vehicleCapacity > 0) ? (cargaPorCamion[i] * 100) / vehicleCapacity : 0;
+            int bloquesEncendidos = porcentaje / 10;
+            std::string barraProgreso = "[";
+            for (int b = 0; b < 10; ++b) {
+                barraProgreso += (b < bloquesEncendidos) ? "X" : ".";
+            }
+            barraProgreso += "] " + std::to_string(porcentaje) + "%";
+
+            // 2. Paradas e indicadores de distancias intermedias
+            int paradas = activeRoutes[i].size();
+            float distPromedio = (paradas > 0) ? distanciaPorCamion[i] / (paradas + 1) : 0.0f;
+
+            // 3. Tiempo de tramo estimado
+            float tiempoEstimado = distanciaPorCamion[i] / 45.0f;
+
+            std::stringstream ssCamion;
+            ssCamion << "VEHICULO " << (i + 1) << ": "
+         << (esVehiculoExcedente ? "[INFACTIBLE]" : (lineasADibujar >= totalAristasSolucion ? "[COMPLETADO]" : "[EN RUTA]")) << "\n"
+         << "  Carga: " << cargaPorCamion[i] << "/" << vehicleCapacity << " u. " << barraProgreso << "\n"
+         << "  Tramos: " << paradas << " | Temp: " << std::fixed << std::setprecision(1) << tiempoEstimado << "s | Dist: " << (int)distanciaPorCamion[i] << "px\n"
+         << "  Ruta: DEP -> ";
+        for (int node : activeRoutes[i]) { ssCamion << "P" << node << " -> "; }
+            ssCamion << "DEP\n"
+         << "........................................................";
+
+            uiCamiones.setFillColor(colorCamion); 
+            uiCamiones.setString(ssCamion.str());
+            uiCamiones.setPosition({currentX, currentY});
+            window.draw(uiCamiones);
+            
+            indexCamionActivo++; // Incrementamos solo para los camiones que realmente tienen datos
         }
     }
-    if(reporteCamiones.size() > 3) {
-        ssInferior << "... y otros " << (reporteCamiones.size() - 3) << " camiones operando rutas adicionales.";
-    }
 
-    uiCamiones.setString(ssInferior.str());
-    
-    // Cambiar dinámicamente el color del cuadro inferior para identificar el algoritmo en ejecución
-    uiCamiones.setFillColor(useClarkeWright ? sf::Color(144, 238, 144) : sf::Color(173, 216, 230)); 
-    window.draw(uiCamiones);
-
-    window.display(); 
+    window.display();
 }
 
 void GuiApp::run() {
