@@ -23,17 +23,27 @@ private:
     int totalSavingsEvaluados = 0;   // Cuántos pares i,j se analizaron
     int totalSavingsAceptados = 0;   // Cuántas fusiones pasaron los filtros de capacidad
 
+    // Modo activo: 0=Clarke-Wright  1=Vecino Más Cercano  2=2-opt
+    int modoActivo;
+
     std::vector<Customer> customers;
     int vehicleCapacity;
     
-    // Resultados de Algoritmos
+    // Resultados Clarke-Wright
     std::vector<std::vector<int>> cwRoutes;
     float cwDistance;
     double cwTime;
 
+    // Resultados Vecino Más Cercano
     std::vector<std::vector<int>> nnRoutes;
     float nnDistance;
     double nnTime;
+
+    // Resultados 2-opt 
+    std::vector<std::vector<int>> twoOptRoutes;
+    float twoOptDistance;
+    double twoOptTime;
+
 
     // Métodos internos
     void pedirDatosPorConsola(); // Captura Z, N y Capacidad antes de abrir la ventana

@@ -1,5 +1,6 @@
 #include "GuiApp.h"
 #include "SavingsAlgorithm.h"
+#include "TwoOptAlgorithm.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -7,7 +8,8 @@
 #include <cstdlib>
 #include <ctime>
 
-GuiApp::GuiApp() : cwDistance(0), cwTime(0), nnDistance(0), nnTime(0), useClarkeWright(true), lineasADibujar(0) {
+GuiApp::GuiApp() : cwDistance(0), cwTime(0), nnDistance(0), nnTime(0),twoOptDistance(0), twoOptTime(0),
+                   modoActivo(0), useClarkeWright(true), lineasADibujar(0) {
     std::srand(std::time(nullptr)); // Semilla para generación aleatoria escalable
     pedirDatosPorConsola();
     actualizarAlgoritmos();
@@ -65,10 +67,16 @@ void GuiApp::pedirDatosPorConsola() {
 void GuiApp::actualizarAlgoritmos() {
     cwRoutes = SavingsAlgorithm::solveClarkeWright(customers, vehicleCapacity, cwDistance, cwTime);
     nnRoutes = SavingsAlgorithm::solveNearestNeighbor(customers, vehicleCapacity, nnDistance, nnTime);
-    
+    // 2-opt es independiente: construye su propia solución inicial y la refina
+    twoOptRoutes = TwoOptAlgorithm::solveTwoOpt(customers, vehicleCapacity, twoOptDistance, twoOptTime);
+
+    // Seleccionar la colección activa según el modo actual (0=CW, 1=NN, 2=2opt)
+    const auto& activeRoutes = (modoActivo == 0) ? cwRoutes :
+                               (modoActivo == 1) ? nnRoutes : twoOptRoutes;
+
+
     // Contar aristas totales para la animación por ENTER
     totalAristasSolucion = 0;
-    const auto& activeRoutes = useClarkeWright ? cwRoutes : nnRoutes;
     for (const auto& route : activeRoutes) {
         if (!route.empty()) {
             totalAristasSolucion += (route.size() + 1);
@@ -82,8 +90,10 @@ void GuiApp::actualizarAlgoritmos() {
     naiveDistance += (d * 2.0f); 
     }
     // El ahorro es simplemente la resta
-    totalSavingsGenerados = naiveDistance - (useClarkeWright ? cwDistance : nnDistance);
-    if (totalSavingsGenerados < 0) totalSavingsGenerados = 0; // Por si Vecino Cercano es pésimo
+    float distActiva = (modoActivo == 0) ? cwDistance :
+                       (modoActivo == 1) ? nnDistance : twoOptDistance;
+    totalSavingsGenerados = naiveDistance - distActiva;
+    if (totalSavingsGenerados < 0) totalSavingsGenerados = 0;
 }
 
 void GuiApp::initWindow() {
@@ -108,7 +118,9 @@ void GuiApp::processEvents() {
         }
         else if (const auto* keyPressed = event->getIf<sf::Event::KeyPressed>()) {
             if (keyPressed->code == sf::Keyboard::Key::Tab) {
-                useClarkeWright = !useClarkeWright;
+                // TAB cicla entre 3 modos: 0=Clarke-Wright -> 1=Vecino Más Cercano -> 2=2-opt -> 0
+                modoActivo = (modoActivo + 1) % 3;
+                useClarkeWright = (modoActivo == 0);
                 lineasADibujar = 0; 
                 actualizarAlgoritmos();
             }
@@ -125,7 +137,8 @@ void GuiApp::render() {
     window.clear(sf::Color(20, 20, 20)); 
 
     float Y_OFFSET = 120.0f; // Ajuste para desplazar el mapa debajo del panel principal de métricas
-    const auto& activeRoutes = useClarkeWright ? cwRoutes : nnRoutes;
+    const auto& activeRoutes = (modoActivo == 0) ? cwRoutes :
+                               (modoActivo == 1) ? nnRoutes : twoOptRoutes;
     
     sf::Color routeColors[] = {sf::Color::Green, sf::Color::Cyan, sf::Color::Magenta, sf::Color::Yellow, sf::Color(255, 165, 0), sf::Color(138, 43, 226)};
     int colorCount = 6;
@@ -238,7 +251,10 @@ void GuiApp::render() {
     for(int c : cargaPorCamion) totalCargaFlota += c;
     float eficienciaOcupacion = (totalCamionesUsados > 0) ? (totalCargaFlota / (totalCamionesUsados * vehicleCapacity)) * 100.0f : 0.0f;
 
-    float distanciaActual = useClarkeWright ? cwDistance : nnDistance;
+    float distanciaActual = (modoActivo == 0) ? cwDistance :
+                            (modoActivo == 1) ? nnDistance : twoOptDistance;
+    double tiempoActual = (modoActivo == 0) ? cwTime :
+                          (modoActivo == 1) ? nnTime : twoOptTime;                   
     float litrosConsumidos = (distanciaActual / 100.0f) * 1.5f;
     float CO2Generado = litrosConsumidos * 2.6f;
 
@@ -269,7 +285,10 @@ void GuiApp::render() {
             cargaNoAtendidaTotal += cargaPorCamion[i];
         }
     }
-
+    // Nombre del algoritmo activo en el panel
+    std::string nombreAlgo = (modoActivo == 0) ? "CLARKE-WRIGHT SAVINGS ENGINE" :
+                             (modoActivo == 1) ? "VECINO MAS CERCANO" : "BUSQUEDA LOCAL 2-OPT";
+    
     // --- RE-RENDER PANEL SUPERIOR COMPACTO ---
     sf::Text uiText(font); 
     uiText.setCharacterSize(11);
@@ -280,9 +299,9 @@ void GuiApp::render() {
     ssSuperior << "=== PANEL ANALITICO DE LOGISTICA GLOBAL ===\n"
                << "Proveedores: " << cantidadProveedores << " | Flota Max (N): " << cantidadCamionesMax 
                << " | Camiones Req: " << totalCamionesUsados << " | Utilizacion Media Carga: " << (int)eficienciaOcupacion << "%\n"
-               << "Algoritmo: " << (useClarkeWright ? "CLARKE-WRIGHT SAVINGS ENGINE" : "VECINO MAS CERCANO") 
+               << "Algoritmo: " << nombreAlgo
                << " | Ratio Compactacion: " << std::fixed << std::setprecision(2) << ratioCompactacion << " prov/vco\n"
-               << "Dist. Flota: " << (int)distanciaActual << " px (Ahorro vs Naive: " << (int)totalSavingsGenerados << " px) | CPU Alg: " << (useClarkeWright ? cwTime : nnTime) << " ms\n"
+               << "Dist. Flota: " << (int)distanciaActual << " px (Ahorro vs Naive: " << (int)totalSavingsGenerados << " px) | CPU Alg: " << std::fixed << std::setprecision(2) << tiempoActual << " ms\n"
                << "DIAGNOSTICO: " << (totalCamionesUsados <= cantidadCamionesMax ? "[SOLUCION FACTIBLE]" : "[¡SOLUCION INFACTIBLE - AJUSTAR EXCESO!]") << " ";
     
     if (totalCamionesUsados > cantidadCamionesMax) {
